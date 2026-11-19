@@ -1,0 +1,3 @@
+interface:
+  display_name: "Behance Original Images"
+  short_description: "Download every original image from a Behance project"

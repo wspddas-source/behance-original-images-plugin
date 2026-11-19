@@ -1,0 +1,40 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "behance-original-images",
+  "version": "1.0.0",
+  "description": "Download every original image from a Behance project gallery",
+  "author": {
+    "name": "wspddas-source",
+    "url": "https://github.com/wspddas-source"
+  },
+  "homepage": "https://github.com/wspddas-source/behance-original-images",
+  "repository": "https://github.com/wspddas-source/behance-original-images-plugin",
+  "license": "MIT",
+  "keywords": [
+    "behance",
+    "images",
+    "download",
+    "codex-skill"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Behance Original Images",
+        "shortDescription": "Download every original image from a Behance project",
+        "longDescription": "Extract all project-body images from a Behance gallery, fetch the highest-quality source variants, and save and verify them in a local folder.",
+        "developerName": "wspddas-source",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://github.com/wspddas-source/behance-original-images",
+        "defaultPrompt": [
+          "Use Behance Original Images to download every image from this Behance project into a folder on my Desktop.",
+          "Use Behance Original Images to save the full-resolution images from this Behance gallery."
+        ],
+        "brandColor": "#FF7A00"
+      }
+    }
+  }
+}
