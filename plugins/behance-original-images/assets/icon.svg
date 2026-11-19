@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Behance image download">
+  <rect width="256" height="256" rx="52" fill="#FF7A00"/>
+  <rect x="48" y="48" width="160" height="160" rx="24" fill="none" stroke="#FFFFFF" stroke-width="14"/>
+  <path d="M128 78v76m0 0-29-29m29 29 29-29" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M82 181h92" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+</svg>

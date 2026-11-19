@@ -29,11 +29,14 @@
           "Write"
         ],
         "websiteURL": "https://github.com/wspddas-source/behance-original-images",
+        "supportURL": "https://github.com/wspddas-source/behance-original-images-plugin/issues",
         "defaultPrompt": [
           "Use Behance Original Images to download every image from this Behance project into a folder on my Desktop.",
           "Use Behance Original Images to save the full-resolution images from this Behance gallery."
         ],
-        "brandColor": "#FF7A00"
+        "brandColor": "#FF7A00",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/icon.svg"
       }
     }
   }
