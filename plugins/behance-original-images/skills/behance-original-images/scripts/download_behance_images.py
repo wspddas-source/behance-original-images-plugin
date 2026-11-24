@@ -24,7 +24,6 @@ IMAGE_TYPES = {
     "image/jpeg",
     "image/png",
     "image/webp",
-    "image/gif",
     "image/avif",
 }
 print_lock = threading.Lock()
@@ -98,32 +97,55 @@ def detect_system_proxy() -> str | None:
     return None
 
 
-def looks_like_image(path: Path) -> bool:
+def image_kind(path: Path) -> str | None:
     try:
         with path.open("rb") as handle:
             head = handle.read(16)
     except OSError:
-        return False
-    return (
-        head.startswith(b"\xff\xd8\xff")
-        or head.startswith(b"\x89PNG\r\n\x1a\n")
-        or head.startswith((b"GIF87a", b"GIF89a"))
-        or (head.startswith(b"RIFF") and head[8:12] == b"WEBP")
-        or (head[4:8] == b"ftyp" and head[8:12] in {b"avif", b"avis"})
-    )
+        return None
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "webp"
+    if head[4:8] == b"ftyp" and head[8:12] in {b"avif", b"avis"}:
+        return "avif"
+    return None
+
+
+def sanitize_project_title(title: str) -> str:
+    safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", title)
+    safe = re.sub(r"\s+", " ", safe).strip(" ._")
+    return safe[:80].rstrip(" ._") or "Behance项目"
+
+
+def create_output_folder(desktop: Path, project_title: str) -> tuple[Path, str]:
+    desktop.mkdir(parents=True, exist_ok=True)
+    base = sanitize_project_title(project_title)
+    number = 1
+    while True:
+        file_base = base if number == 1 else f"{base}_{number}"
+        folder = desktop / f"{file_base}_原图"
+        try:
+            folder.mkdir()
+            return folder, file_base
+        except FileExistsError:
+            number += 1
 
 
 def download(
-    filename: str,
+    target_name: str,
+    source_name: str,
     url: str,
-    destination: Path,
+    folder: Path,
     opener: urllib.request.OpenerDirector,
 ) -> tuple[str, str]:
-    target = destination / filename
+    target = folder / target_name
     if target.exists():
-        if looks_like_image(target):
-            return ("skip", filename)
-        return ("failed", f"{filename}: existing file is not a recognized image")
+        return ("skip", target_name)
 
     request = urllib.request.Request(
         url,
@@ -138,26 +160,32 @@ def download(
         try:
             with opener.open(request, timeout=90) as response:
                 content_type = response.headers.get_content_type()
-                if content_type not in IMAGE_TYPES:
-                    raise ValueError(f"unexpected content type: {content_type}")
+                if content_type == "image/gif":
+                    return ("gif", target_name)
                 with tempfile.NamedTemporaryFile(
-                    dir=destination,
-                    prefix=f".{filename}.",
+                    dir=folder,
+                    prefix=f".{target_name}.",
                     suffix=".part",
                     delete=False,
                 ) as temp_file:
                     temp_path = Path(temp_file.name)
                     while chunk := response.read(1024 * 1024):
                         temp_file.write(chunk)
-            if not looks_like_image(temp_path):
+            kind = image_kind(temp_path)
+            if kind == "gif":
+                temp_path.unlink()
+                return ("gif", target_name)
+            if content_type not in IMAGE_TYPES:
+                raise ValueError(f"unexpected content type: {content_type}")
+            if kind is None:
                 raise ValueError("downloaded content is not a recognized image")
             os.replace(temp_path, target)
-            return ("ok", filename)
+            return ("ok", target_name)
         except (OSError, ValueError, urllib.error.URLError) as error:
             last_error = error
             if temp_path and temp_path.exists():
                 temp_path.unlink()
-    return ("failed", f"{filename}: {last_error}")
+    return ("failed", f"{target_name} <- {source_name}: {last_error}")
 
 
 def self_test() -> None:
@@ -169,11 +197,78 @@ def self_test() -> None:
     assert extract_images(f'["{url}", "{url}?cache=1"]') == {
         "demo.jpg": url
     }
+    assert sanitize_project_title(' My / Project: 01? ') == "My _ Project_ 01"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        gif = Path(temp_dir) / "demo.gif"
+        gif.write_bytes(b"GIF89a")
+        assert image_kind(gif) == "gif"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        desktop = Path(temp_dir)
+        first, first_base = create_output_folder(desktop, "Demo")
+        second, second_base = create_output_folder(desktop, "Demo")
+        assert first.name == "Demo_原图" and first_base == "Demo"
+        assert second.name == "Demo_2_原图" and second_base == "Demo_2"
+
+    class FakeHeaders:
+        def __init__(self, content_type: str) -> None:
+            self.content_type = content_type
+
+        def get_content_type(self) -> str:
+            return self.content_type
+
+    class FakeResponse:
+        def __init__(self, content_type: str, body: bytes) -> None:
+            self.headers = FakeHeaders(content_type)
+            self.body = body
+
+        def read(self, _size: int) -> bytes:
+            body, self.body = self.body, b""
+            return body
+
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeOpener:
+        def __init__(self, content_type: str, body: bytes) -> None:
+            self.content_type = content_type
+            self.body = body
+
+        def open(self, *_args: object, **_kwargs: object) -> FakeResponse:
+            return FakeResponse(self.content_type, self.body)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        folder = Path(temp_dir)
+        assert download(
+            "Demo_01.jpg",
+            "source.jpg",
+            "https://example.test/source.jpg",
+            folder,
+            FakeOpener("image/jpeg", b"\xff\xd8\xff\x00"),
+        )[0] == "ok"
+        assert download(
+            "Demo_02.jpg",
+            "source.jpg",
+            "https://example.test/source.jpg",
+            folder,
+            FakeOpener("image/gif", b"GIF89a"),
+        )[0] == "gif"
+        assert download(
+            "Demo_03.jpg",
+            "source.jpg",
+            "https://example.test/source.jpg",
+            folder,
+            FakeOpener("image/jpeg", b"GIF89a"),
+        )[0] == "gif"
+        assert sorted(path.name for path in folder.iterdir()) == ["Demo_01.jpg"]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("destination", nargs="?", help="Output directory")
+    parser.add_argument("--project-title")
+    parser.add_argument("--desktop", type=Path, default=Path.home() / "Desktop")
     parser.add_argument("--proxy", help="HTTP proxy URL; overrides system detection")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true")
@@ -184,20 +279,45 @@ def main() -> int:
         self_test()
         print("self-test passed")
         return 0
-    if not args.destination:
-        parser.error("destination is required")
-
+    if not args.project_title:
+        parser.error("--project-title is required")
     images = extract_images(sys.stdin.read())
     if not images:
         print("No Behance project-module image URLs found.", file=sys.stderr)
         return 1
+
+    tasks: list[tuple[str, str, str]] = []
+    gif_names: list[str] = []
+    for filename, url in images.items():
+        suffix = Path(filename).suffix
+        if suffix.lower() == ".gif":
+            gif_names.append(filename)
+        else:
+            tasks.append((filename, url, suffix))
+
+    base = sanitize_project_title(args.project_title)
     if args.dry_run:
-        for filename, url in images.items():
-            print(f"DRY\t{filename}\t{url}")
+        number = 0
+        for filename, url, suffix in tasks:
+            number += 1
+            print(f"DRY\t{base}_{number:02d}{suffix}\t{url}")
+        for filename in gif_names:
+            print(f"GIF_SKIPPED\t{filename}")
         return 0
 
-    destination = Path(args.destination).expanduser()
-    destination.mkdir(parents=True, exist_ok=True)
+    if not tasks:
+        print(
+            f"SUMMARY\tunique={len(images)} ok=0 skipped=0 "
+            f"gif_skipped={len(gif_names)} failed=0"
+        )
+        return 0
+
+    desktop = args.desktop.expanduser()
+    folder, file_base = create_output_folder(desktop, args.project_title)
+    targets = [
+        f"{file_base}_{number:02d}{suffix}"
+        for number, (_filename, _url, suffix) in enumerate(tasks, start=1)
+    ]
     proxy = args.proxy or detect_system_proxy()
     if proxy:
         opener = urllib.request.build_opener(
@@ -207,14 +327,23 @@ def main() -> int:
     else:
         opener = urllib.request.build_opener()
 
-    counts = {"ok": 0, "skip": 0, "failed": 0}
+    counts = {"ok": 0, "skip": 0, "gif": len(gif_names), "failed": 0}
     failures: list[str] = []
+    for filename in gif_names:
+        log(f"GIF_SKIPPED\t{filename}")
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, args.workers)
     ) as executor:
         futures = [
-            executor.submit(download, filename, url, destination, opener)
-            for filename, url in images.items()
+            executor.submit(
+                download,
+                target_name,
+                filename,
+                url,
+                folder,
+                opener,
+            )
+            for target_name, (filename, url, _suffix) in zip(targets, tasks)
         ]
         for future in concurrent.futures.as_completed(futures):
             outcome, detail = future.result()
@@ -223,9 +352,11 @@ def main() -> int:
                 failures.append(detail)
             log(f"{outcome.upper()}\t{detail}")
 
+    print(f"FOLDER\t{folder}")
     print(
         f"SUMMARY\tunique={len(images)} ok={counts['ok']} "
-        f"skipped={counts['skip']} failed={counts['failed']}"
+        f"skipped={counts['skip']} gif_skipped={counts['gif']} "
+        f"failed={counts['failed']}"
     )
     for failure in failures:
         print(f"ERROR\t{failure}", file=sys.stderr)
